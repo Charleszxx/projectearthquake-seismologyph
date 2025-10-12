@@ -1,15 +1,14 @@
 {
-  "name": "seismology-dashboard",
+  "name": "phivolcs-seismo",
   "version": "1.0.0",
-  "description": "PHIVOLCS Seismology Monitoring Dashboard",
+  "description": "Seismology Monitoring Dashboard using PHIVOLCS data",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
-  },
-  "engines": {
-    "node": ">=18.x"
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "cors": "^2.8.5"
   }
 }
