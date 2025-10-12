@@ -15,18 +15,16 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 // ✅ PHIVOLCS proxy endpoint
 app.get("/api/phivolcs", async (req, res) => {
   try {
-    const response = await fetch("https://earthquake.phivolcs.dost.gov.ph/", {
-      agent: httpsAgent,
-    });
+    const response = await fetch(
+      "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
+    );
+    if (!response.ok) throw new Error("Failed to fetch USGS data");
 
-    if (!response.ok) throw new Error("Failed to fetch PHIVOLCS data");
-
-    const html = await response.text();
-    res.set("Content-Type", "text/html");
-    res.send(html);
+    const data = await response.json();
+    res.json(data);
   } catch (err) {
     console.error("Error fetching PHIVOLCS data:", err);
-    res.status(500).json({ error: "Unable to fetch PHIVOLCS data" });
+    res.status(500).json({ error: "Unable to fetch earthquake data" });
   }
 });
 
