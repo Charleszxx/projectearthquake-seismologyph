@@ -10,10 +10,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.static("public"));
 
-// ✅ Allow insecure SSL (PHIVOLCS SSL issues)
 const agent = new https.Agent({ rejectUnauthorized: false });
 
-// ✅ Safe Fetch with timeout
 async function safeFetch(url, options = {}, timeout = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -27,25 +25,24 @@ async function safeFetch(url, options = {}, timeout = 8000) {
   }
 }
 
-// ✅ Persistent fallback flag (auto resets)
-let useFallback = false;
-let lastPHIVOLCSError = 0;
-const RETRY_DELAY = 5 * 60 * 1000; // 5 minutes before retrying PHIVOLCS
+// Fallback tracking
+let usingFallback = false;
+let lastFallbackTime = 0;
+const RETRY_INTERVAL = 2 * 60 * 1000; // retry PHIVOLCS every 2 minutes
 
-// ✅ Fetch PHIVOLCS → fallback to USGS if fails
 app.get("/api/phivolcs", async (req, res) => {
+  const now = Date.now();
+
+  // If currently using fallback, test PHIVOLCS occasionally
+  if (usingFallback && now - lastFallbackTime < RETRY_INTERVAL) {
+    console.log("⚙️ Using cached fallback (PHIVOLCS still unavailable)");
+    return await getUSGS(res);
+  }
+
   try {
-    const now = Date.now();
-
-    // If fallback active, retry PHIVOLCS every 5 minutes
-    if (useFallback && now - lastPHIVOLCSError < RETRY_DELAY) {
-      console.log("⚙️ Using cached fallback (PHIVOLCS still unavailable)");
-      return await getUSGS(res);
-    }
-
     console.log("🌏 Fetching PHIVOLCS data...");
     const response = await safeFetch("https://earthquake.phivolcs.dost.gov.ph/", { agent }, 5000);
-    if (!response.ok) throw new Error("Failed to fetch PHIVOLCS website");
+    if (!response.ok) throw new Error("PHIVOLCS site unreachable");
 
     const html = await response.text();
     const $ = cheerio.load(html);
@@ -69,26 +66,26 @@ app.get("/api/phivolcs", async (req, res) => {
       });
     });
 
-    if (quakes.length === 0) throw new Error("PHIVOLCS returned empty or invalid data");
+    if (quakes.length === 0) throw new Error("PHIVOLCS returned empty data");
 
     console.log(`✅ PHIVOLCS data fetched successfully (${quakes.length} records)`);
-    useFallback = false; // reset fallback
+    usingFallback = false; // switch back to PHIVOLCS
     res.json(quakes);
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch failed:", err.message);
-    lastPHIVOLCSError = Date.now();
-    useFallback = true;
+    usingFallback = true;
+    lastFallbackTime = Date.now();
     await getUSGS(res);
   }
 });
 
-// ✅ Fallback: USGS (Philippines region only)
+// USGS fallback
 async function getUSGS(res) {
   try {
     console.log("🌎 Fetching USGS fallback data (Philippines region)...");
     const url =
       "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson" +
-      "&starttime=" + new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() + // past 24h
+      "&starttime=" + new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() +
       "&minlatitude=4&maxlatitude=21" +
       "&minlongitude=116&maxlongitude=127" +
       "&minmagnitude=1";
@@ -115,5 +112,4 @@ async function getUSGS(res) {
   }
 }
 
-// ✅ Start Server
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
