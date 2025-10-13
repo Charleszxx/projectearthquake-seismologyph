@@ -43,15 +43,18 @@ app.get("/api/phivolcs", async (req, res) => {
     // ✅ Find PHIVOLCS table (skip header row)
     $("table tr").slice(1).each((_, row) => {
       const tds = $(row).find("td");
+      if (tds.length < 6) return; // skip invalid rows
       const dateStr = $(tds[0]).text().trim().replace("PST", "").trim();
-
+    
+      if (!dateStr) return; // skip empty rows
+    
       quakes.push({
         datetime: dateStr,
-        latitude: parseFloat($(tds[1]).text().trim()),
-        longitude: parseFloat($(tds[2]).text().trim()),
+        latitude: parseFloat($(tds[1]).text().trim()) || 0,
+        longitude: parseFloat($(tds[2]).text().trim()) || 0,
         depth: $(tds[3]).text().trim(),
-        magnitude: parseFloat($(tds[4]).text().trim()),
-        location: $(tds[5]).text().trim(),
+        magnitude: parseFloat($(tds[4]).text().trim()) || 0,
+        location: $(tds[5]).text().trim() || "Unknown"
       });
     });
 
