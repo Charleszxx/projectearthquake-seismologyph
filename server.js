@@ -86,6 +86,46 @@ app.get("/api/phivolcs", async (req, res) => {
   }
 });
 
+app.get("/api/phivolcs/all", async (req, res) => {
+  console.log("🌏 Fetching ALL PHIVOLCS data...");
+  try {
+    const url = "https://earthquake.phivolcs.dost.gov.ph/";
+    const response = await safeFetch(`${url}?t=${Date.now()}`, { agent }, 8000);
+
+    if (!response.ok) throw new Error("Failed to fetch PHIVOLCS page");
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    const quakes = [];
+
+    $("table tbody tr").each((_, row) => {
+      const tds = $(row).find("td");
+      if (tds.length < 6) return;
+
+      quakes.push({
+        datetime: $(tds[0]).text().trim(),
+        latitude: parseFloat($(tds[1]).text().trim()) || 0,
+        longitude: parseFloat($(tds[2]).text().trim()) || 0,
+        depth: $(tds[3]).text().trim(),
+        magnitude: parseFloat($(tds[4]).text().trim()) || 0,
+        location: $(tds[5]).text().trim(),
+        source: "PHIVOLCS",
+      });
+    });
+
+    if (quakes.length === 0) throw new Error("No earthquake data found");
+
+    // Sort newest first
+    quakes.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+
+    res.json(quakes); // send all data
+  } catch (err) {
+    console.error("⚠️ PHIVOLCS fetch ALL error:", err.message);
+    res.status(500).json({ error: "Unable to fetch all PHIVOLCS earthquake data" });
+  }
+});
+
 // USGS fallback
 async function getUSGS(res, feed = "all_day") {
   try {
