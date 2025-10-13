@@ -53,53 +53,45 @@ app.use((req, res, next) => {
 
 // ✅ Main PHIVOLCS API route with filter support
 app.get("/api/phivolcs", async (req, res) => {
-  console.log("🌏 Fetching PHIVOLCS data (iframe-aware)...");
+  console.log("🌏 Fetching PHIVOLCS data...");
   try {
-    const baseUrl = "https://earthquake.phivolcs.dost.gov.ph/";
-    const response = await safeFetch(`${baseUrl}?t=${Date.now()}`, { agent }, 8000);
+    const url = "https://earthquake.phivolcs.dost.gov.ph/";
+    const response = await safeFetch(`${url}?t=${Date.now()}`, { agent }, 8000);
 
-    if (!response.ok) throw new Error("Failed to fetch PHIVOLCS homepage");
+    if (!response.ok) throw new Error("Failed to fetch PHIVOLCS page");
 
-    const homepage = await response.text();
-    const $ = cheerio.load(homepage);
-
-    // Find the iframe source for the live table
-    const iframeSrc = $("iframe").attr("src");
-    if (!iframeSrc) throw new Error("No iframe found on PHIVOLCS page");
-
-    const fullIframeUrl = new URL(iframeSrc, baseUrl).href;
-    console.log("Found live iframe:", fullIframeUrl);
-
-    // Now fetch the iframe content (the real table)
-    const frameRes = await safeFetch(`${fullIframeUrl}?t=${Date.now()}`, { agent }, 8000);
-    if (!frameRes.ok) throw new Error("Failed to fetch PHIVOLCS iframe content");
-
-    const frameHtml = await frameRes.text();
-    const $$ = cheerio.load(frameHtml);
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
     const quakes = [];
-    $$("table tbody tr").each((_, row) => {
-      const tds = $$(row).find("td");
+
+    // PHIVOLCS table rows
+    $("table tbody tr").each((_, row) => {
+      const tds = $(row).find("td");
       if (tds.length < 6) return;
+
       quakes.push({
-        datetime: $$(tds[0]).text().trim(),
-        latitude: parseFloat($$(tds[1]).text().trim()) || 0,
-        longitude: parseFloat($$(tds[2]).text().trim()) || 0,
-        depth: $$(tds[3]).text().trim(),
-        magnitude: parseFloat($$(tds[4]).text().trim()) || 0,
-        location: $$(tds[5]).text().trim(),
-        source: "PHIVOLCS (Live)",
+        datetime: $(tds[0]).text().trim(),
+        latitude: parseFloat($(tds[1]).text().trim()) || 0,
+        longitude: parseFloat($(tds[2]).text().trim()) || 0,
+        depth: $(tds[3]).text().trim(),
+        magnitude: parseFloat($(tds[4]).text().trim()) || 0,
+        location: $(tds[5]).text().trim(),
+        source: "PHIVOLCS",
       });
     });
 
     if (quakes.length === 0) throw new Error("No earthquake data found");
+
+    // Sort newest first
     quakes.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
 
     res.setHeader("Cache-Control", "no-store");
     res.json(quakes);
+
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch error:", err.message);
-    await getUSGS(res);
+    await getUSGS(res); // fallback to USGS
   }
 });
 
