@@ -45,17 +45,8 @@ function getStartTime(feed) {
 
 // ✅ Main PHIVOLCS API route with filter support
 app.get("/api/phivolcs", async (req, res) => {
-  const now = Date.now();
-  const feed = req.query.feed || "all_day"; // accept ?feed=all_hour, all_day, all_week
-
-  // If currently using fallback, test PHIVOLCS occasionally
-  if (usingFallback && now - lastFallbackTime < RETRY_INTERVAL) {
-    console.log("⚙️ Using cached fallback (PHIVOLCS still unavailable)");
-    return await getUSGS(res, feed);
-  }
-
+  console.log("🌏 Fetching all PHIVOLCS data...");
   try {
-    console.log(`🌏 Fetching PHIVOLCS data (feed=${feed})...`);
     const response = await safeFetch("https://earthquake.phivolcs.dost.gov.ph/", { agent }, 5000);
     if (!response.ok) throw new Error("PHIVOLCS site unreachable");
 
@@ -66,12 +57,8 @@ app.get("/api/phivolcs", async (req, res) => {
     $("table tr").slice(1).each((_, row) => {
       const tds = $(row).find("td");
       if (tds.length < 6) return;
-
-      const dateStr = $(tds[0]).text().trim().replace("PST", "").trim();
-      if (!dateStr) return;
-
       quakes.push({
-        datetime: dateStr,
+        datetime: $(tds[0]).text().trim(),
         latitude: parseFloat($(tds[1]).text().trim()) || 0,
         longitude: parseFloat($(tds[2]).text().trim()) || 0,
         depth: $(tds[3]).text().trim(),
@@ -81,19 +68,10 @@ app.get("/api/phivolcs", async (req, res) => {
       });
     });
 
-    // ✅ Remove strict time filtering for PHIVOLCS
-    // (Site already lists only recent quakes; filtering can cause false "empty data")
-
-    if (quakes.length === 0) throw new Error("PHIVOLCS returned empty data");
-
-    console.log(`✅ PHIVOLCS data fetched successfully (${quakes.length} records)`);
-    usingFallback = false;
     res.json(quakes);
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch failed:", err.message);
-    usingFallback = true;
-    lastFallbackTime = Date.now();
-    await getUSGS(res, req.query.feed || "all_day");
+    await getUSGS(res);
   }
 });
 
