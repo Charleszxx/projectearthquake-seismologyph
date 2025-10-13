@@ -45,10 +45,8 @@ function getStartTime(feed) {
 
 // ✅ Main PHIVOLCS API route with filter support
 app.get("/api/phivolcs", async (req, res) => {
-  const feed = req.query.feed || "all_day";
-  const startTime = getStartTime(feed);
   const now = Date.now();
-  console.log("🕒 PH Time Now:", new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" }));
+  const feed = req.query.feed || "all_day"; // accept ?feed=all_hour, all_day, all_week
 
   // If currently using fallback, test PHIVOLCS occasionally
   if (usingFallback && now - lastFallbackTime < RETRY_INTERVAL) {
@@ -68,22 +66,12 @@ app.get("/api/phivolcs", async (req, res) => {
     $("table tr").slice(1).each((_, row) => {
       const tds = $(row).find("td");
       if (tds.length < 6) return;
-    
+
       const dateStr = $(tds[0]).text().trim().replace("PST", "").trim();
       if (!dateStr) return;
-    
-      // ✅ Convert PHIVOLCS (PST) to Date in PH time
-      let quakeDate = new Date(dateStr);
-      if (isNaN(quakeDate)) return;
-    
-      // ✅ Adjust manually to UTC+8 (if server runs UTC)
-      quakeDate = new Date(quakeDate.getTime() - (8 * 60 * 60 * 1000));
-    
-      // ✅ Filter by selected feed time window
-      if (quakeDate < startTime) return;
-    
+
       quakes.push({
-        datetime: quakeDate.toLocaleString("en-PH", { timeZone: "Asia/Manila" }),
+        datetime: dateStr,
         latitude: parseFloat($(tds[1]).text().trim()) || 0,
         longitude: parseFloat($(tds[2]).text().trim()) || 0,
         depth: $(tds[3]).text().trim(),
@@ -93,16 +81,19 @@ app.get("/api/phivolcs", async (req, res) => {
       });
     });
 
+    // ✅ Remove strict time filtering for PHIVOLCS
+    // (Site already lists only recent quakes; filtering can cause false "empty data")
+
     if (quakes.length === 0) throw new Error("PHIVOLCS returned empty data");
 
     console.log(`✅ PHIVOLCS data fetched successfully (${quakes.length} records)`);
-    usingFallback = false; // switch back to PHIVOLCS
+    usingFallback = false;
     res.json(quakes);
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch failed:", err.message);
     usingFallback = true;
     lastFallbackTime = Date.now();
-    await getUSGS(res, feed);
+    await getUSGS(res, req.query.feed || "all_day");
   }
 });
 
