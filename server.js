@@ -48,6 +48,7 @@ app.get("/api/phivolcs", async (req, res) => {
   const feed = req.query.feed || "all_day";
   const startTime = getStartTime(feed);
   const now = Date.now();
+  console.log("🕒 PH Time Now:", new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" }));
 
   // If currently using fallback, test PHIVOLCS occasionally
   if (usingFallback && now - lastFallbackTime < RETRY_INTERVAL) {
@@ -67,16 +68,22 @@ app.get("/api/phivolcs", async (req, res) => {
     $("table tr").slice(1).each((_, row) => {
       const tds = $(row).find("td");
       if (tds.length < 6) return;
-
+    
       const dateStr = $(tds[0]).text().trim().replace("PST", "").trim();
       if (!dateStr) return;
-
-      const quakeDate = new Date(dateStr);
-      if (isNaN(quakeDate)) return; // skip invalid dates
-      if (quakeDate < startTime) return; // filter by selected time range
-
+    
+      // ✅ Convert PHIVOLCS (PST) to Date in PH time
+      let quakeDate = new Date(dateStr);
+      if (isNaN(quakeDate)) return;
+    
+      // ✅ Adjust manually to UTC+8 (if server runs UTC)
+      quakeDate = new Date(quakeDate.getTime() - (8 * 60 * 60 * 1000));
+    
+      // ✅ Filter by selected feed time window
+      if (quakeDate < startTime) return;
+    
       quakes.push({
-        datetime: quakeDate.toLocaleString(),
+        datetime: quakeDate.toLocaleString("en-PH", { timeZone: "Asia/Manila" }),
         latitude: parseFloat($(tds[1]).text().trim()) || 0,
         longitude: parseFloat($(tds[2]).text().trim()) || 0,
         depth: $(tds[3]).text().trim(),
