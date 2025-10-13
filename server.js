@@ -26,23 +26,18 @@ async function safeFetch(url, options = {}, timeout = 8000) {
   }
 }
 
-// Fallback tracking
-let usingFallback = false;
-let lastFallbackTime = 0;
-const RETRY_INTERVAL = 2 * 60 * 1000; // retry PHIVOLCS every 2 mins
-
-// ✅ Helper: parse time window
+// Helper: parse start time for USGS feed
 function getStartTime(feed) {
   const now = Date.now();
   switch (feed) {
-    case "all_hour": return new Date(now - 1 * 60 * 60 * 1000); // 1 hour
-    case "all_week": return new Date(now - 7 * 24 * 60 * 60 * 1000); // 7 days
+    case "all_hour": return new Date(now - 1 * 60 * 60 * 1000);
+    case "all_week": return new Date(now - 7 * 24 * 60 * 60 * 1000);
     case "all_day":
-    default:
-      return new Date(now - 24 * 60 * 60 * 1000); // 1 day
+    default: return new Date(now - 24 * 60 * 60 * 1000);
   }
 }
 
+// Disable caching
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -51,7 +46,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ Main PHIVOLCS API route with filter support
+// Main PHIVOLCS API route
 app.get("/api/phivolcs", async (req, res) => {
   console.log("🌏 Fetching PHIVOLCS data...");
   try {
@@ -65,7 +60,6 @@ app.get("/api/phivolcs", async (req, res) => {
 
     const quakes = [];
 
-    // PHIVOLCS table rows
     $("table tbody tr").each((_, row) => {
       const tds = $(row).find("td");
       if (tds.length < 6) return;
@@ -83,20 +77,17 @@ app.get("/api/phivolcs", async (req, res) => {
 
     if (quakes.length === 0) throw new Error("No earthquake data found");
 
-    // Sort newest first
+    // Sort newest first and take top 10
     quakes.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
-
-    res.setHeader("Cache-Control", "no-store");
-    res.json(quakes);
-
+    res.json(quakes.slice(0, 10));
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch error:", err.message);
     await getUSGS(res); // fallback to USGS
   }
 });
 
-// ✅ USGS fallback with feed filtering
-async function getUSGS(res, feed) {
+// USGS fallback
+async function getUSGS(res, feed = "all_day") {
   try {
     const startTime = getStartTime(feed);
     console.log(`🌎 Fetching USGS fallback data (${feed})...`);
@@ -113,7 +104,7 @@ async function getUSGS(res, feed) {
 
     const data = await response.json();
     const quakes = data.features.map(eq => ({
-      datetime: new Date(eq.properties.time).toLocaleString(),
+      datetime: new Date(eq.properties.time).toLocaleString("en-PH", { timeZone: "Asia/Manila" }),
       latitude: eq.geometry.coordinates[1],
       longitude: eq.geometry.coordinates[0],
       depth: eq.geometry.coordinates[2] + " km",
@@ -122,8 +113,9 @@ async function getUSGS(res, feed) {
       source: "USGS",
     }));
 
-    console.log(`✅ USGS fallback loaded (${quakes.length} records for ${feed})`);
-    res.json(quakes);
+    // Sort newest first and slice top 10
+    quakes.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+    res.json(quakes.slice(0, 10));
   } catch (err) {
     console.error("❌ Both PHIVOLCS and USGS failed:", err.message);
     res.status(500).json({ error: "Unable to fetch earthquake data" });
