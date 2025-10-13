@@ -11,12 +11,10 @@ app.use(cors());
 app.use(express.static("public"));
 
 // ✅ Allow insecure SSL (PHIVOLCS SSL issues)
-const agent = new https.Agent({
-  rejectUnauthorized: false,
-});
+const agent = new https.Agent({ rejectUnauthorized: false });
 
-// ✅ Helper: Timeout-safe fetch
-async function safeFetch(url, options = {}, timeout = 10000) {
+// ✅ Safe Fetch with timeout
+async function safeFetch(url, options = {}, timeout = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -29,20 +27,30 @@ async function safeFetch(url, options = {}, timeout = 10000) {
   }
 }
 
-// ✅ Main PHIVOLCS Endpoint
+// ✅ Persistent fallback flag (auto resets)
+let useFallback = false;
+let lastPHIVOLCSError = 0;
+const RETRY_DELAY = 5 * 60 * 1000; // 5 minutes before retrying PHIVOLCS
+
+// ✅ Fetch PHIVOLCS → fallback to USGS if fails
 app.get("/api/phivolcs", async (req, res) => {
   try {
-    console.log("🌏 Fetching PHIVOLCS data...");
-    const PHIVOLCS_TIMEOUT = 5000; // ⏱️ Faster fetch timeout
+    const now = Date.now();
 
-    const response = await safeFetch("https://earthquake.phivolcs.dost.gov.ph/", { agent }, PHIVOLCS_TIMEOUT);
+    // If fallback active, retry PHIVOLCS every 5 minutes
+    if (useFallback && now - lastPHIVOLCSError < RETRY_DELAY) {
+      console.log("⚙️ Using cached fallback (PHIVOLCS still unavailable)");
+      return await getUSGS(res);
+    }
+
+    console.log("🌏 Fetching PHIVOLCS data...");
+    const response = await safeFetch("https://earthquake.phivolcs.dost.gov.ph/", { agent }, 5000);
     if (!response.ok) throw new Error("Failed to fetch PHIVOLCS website");
 
     const html = await response.text();
     const $ = cheerio.load(html);
     const quakes = [];
 
-    // ✅ Parse PHIVOLCS table (skip header)
     $("table tr").slice(1).each((_, row) => {
       const tds = $(row).find("td");
       if (tds.length < 6) return;
@@ -64,45 +72,48 @@ app.get("/api/phivolcs", async (req, res) => {
     if (quakes.length === 0) throw new Error("PHIVOLCS returned empty or invalid data");
 
     console.log(`✅ PHIVOLCS data fetched successfully (${quakes.length} records)`);
+    useFallback = false; // reset fallback
     res.json(quakes);
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch failed:", err.message);
-
-    // ✅ Fallback: USGS (Philippines-only)
-    try {
-      console.log("🌎 Switching to USGS fallback (Philippines only)...");
-      const fallbackUrl =
-        "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson" +
-        "&starttime=" + new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() + // past 24h
-        "&minlatitude=4&maxlatitude=21" +
-        "&minlongitude=116&maxlongitude=127" +
-        "&minmagnitude=1";
-
-      const fallbackRes = await safeFetch(fallbackUrl, {}, 8000);
-      if (!fallbackRes.ok) throw new Error("USGS fetch failed");
-
-      const data = await fallbackRes.json();
-      const quakes = data.features.map((eq) => {
-        const date = new Date(eq.properties.time);
-        return {
-          datetime: date.toLocaleString(),
-          latitude: eq.geometry.coordinates[1],
-          longitude: eq.geometry.coordinates[0],
-          depth: eq.geometry.coordinates[2] + " km",
-          magnitude: eq.properties.mag,
-          location: eq.properties.place,
-          source: "USGS",
-        };
-      });
-
-      console.log(`✅ USGS fallback data loaded (${quakes.length} PH records)`);
-      res.json(quakes);
-    } catch (fallbackErr) {
-      console.error("❌ Both PHIVOLCS and USGS failed:", fallbackErr.message);
-      res.status(500).json({ error: "Unable to fetch earthquake data" });
-    }
+    lastPHIVOLCSError = Date.now();
+    useFallback = true;
+    await getUSGS(res);
   }
 });
+
+// ✅ Fallback: USGS (Philippines region only)
+async function getUSGS(res) {
+  try {
+    console.log("🌎 Fetching USGS fallback data (Philippines region)...");
+    const url =
+      "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson" +
+      "&starttime=" + new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() + // past 24h
+      "&minlatitude=4&maxlatitude=21" +
+      "&minlongitude=116&maxlongitude=127" +
+      "&minmagnitude=1";
+
+    const response = await safeFetch(url, {}, 8000);
+    if (!response.ok) throw new Error("USGS fetch failed");
+
+    const data = await response.json();
+    const quakes = data.features.map(eq => ({
+      datetime: new Date(eq.properties.time).toLocaleString(),
+      latitude: eq.geometry.coordinates[1],
+      longitude: eq.geometry.coordinates[0],
+      depth: eq.geometry.coordinates[2] + " km",
+      magnitude: eq.properties.mag,
+      location: eq.properties.place || "Unknown",
+      source: "USGS",
+    }));
+
+    console.log(`✅ USGS fallback loaded (${quakes.length} records)`);
+    res.json(quakes);
+  } catch (err) {
+    console.error("❌ Both PHIVOLCS and USGS failed:", err.message);
+    res.status(500).json({ error: "Unable to fetch earthquake data" });
+  }
+}
 
 // ✅ Start Server
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
