@@ -43,11 +43,29 @@ function getStartTime(feed) {
   }
 }
 
+app.use((req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
+  next();
+});
+
 // ✅ Main PHIVOLCS API route with filter support
 app.get("/api/phivolcs", async (req, res) => {
-  console.log("🌏 Fetching all PHIVOLCS data...");
+  console.log("🌏 Fetching PHIVOLCS data (no-cache)...");
   try {
-    const response = await safeFetch("https://earthquake.phivolcs.dost.gov.ph/", { agent }, 5000);
+    // 👇 add ?nocache timestamp to bust CDN cache
+    const liveUrl = `https://earthquake.phivolcs.dost.gov.ph/?t=${Date.now()}`;
+    const response = await safeFetch(liveUrl, {
+      agent,
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0"
+      }
+    }, 8000);
+
     if (!response.ok) throw new Error("PHIVOLCS site unreachable");
 
     const html = await response.text();
@@ -68,6 +86,12 @@ app.get("/api/phivolcs", async (req, res) => {
       });
     });
 
+    // sort newest first just in case
+    quakes.sort((a, b) =>
+      new Date(b.datetime) - new Date(a.datetime)
+    );
+
+    res.setHeader("Cache-Control", "no-store");
     res.json(quakes);
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch failed:", err.message);
