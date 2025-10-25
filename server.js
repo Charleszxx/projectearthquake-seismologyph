@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: ["https://projectearthquake-seismologyph.netlify.app"],
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control"], // ✅ Added Cache-Control here
 }));
 
 // Optional: respond to preflight requests quickly
