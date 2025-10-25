@@ -7,7 +7,16 @@ import https from "https";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// ✅ Allow specific frontend (Netlify) domain
+app.use(cors({
+  origin: ["https://projectearthquake-seismologyph.netlify.app"],
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+// Optional: respond to preflight requests quickly
+app.options("*", cors());
+
 app.use(express.static("public"));
 
 const agent = new https.Agent({ rejectUnauthorized: false });
