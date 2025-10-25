@@ -7,22 +7,25 @@ import https from "https";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ✅ Allow specific frontend (Netlify) domain
+// ✅ Allow Netlify + local dev for testing
 app.use(cors({
-  origin: ["https://projectearthquake-seismologyph.netlify.app"],
+  origin: [
+    "https://projectearthquake-seismologyph.netlify.app",
+    "http://localhost:3000"
+  ],
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control"], // ✅ Added Cache-Control here
+  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control"],
 }));
 
-// Optional: respond to preflight requests quickly
+// Respond fast to preflight
 app.options("*", cors());
 
 app.use(express.static("public"));
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
-// Safe fetch with timeout
-async function safeFetch(url, options = {}, timeout = 8000) {
+// ✅ Safe fetch with timeout
+async function safeFetch(url, options = {}, timeout = 7000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -35,7 +38,7 @@ async function safeFetch(url, options = {}, timeout = 8000) {
   }
 }
 
-// Helper: parse start time for USGS feed
+// ✅ USGS helper
 function getStartTime(feed) {
   const now = Date.now();
   switch (feed) {
@@ -46,7 +49,7 @@ function getStartTime(feed) {
   }
 }
 
-// Disable caching
+// ✅ Disable caching
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -55,12 +58,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Main PHIVOLCS API route
+// ✅ Main PHIVOLCS API route
 app.get("/api/phivolcs", async (req, res) => {
   console.log("🌏 Fetching PHIVOLCS data...");
   try {
     const url = "https://earthquake.phivolcs.dost.gov.ph/";
-    const response = await safeFetch(`${url}?t=${Date.now()}`, { agent }, 8000);
+    const response = await safeFetch(`${url}?t=${Date.now()}`, { agent }, 7000);
 
     if (!response.ok) throw new Error("Failed to fetch PHIVOLCS page");
 
@@ -72,7 +75,6 @@ app.get("/api/phivolcs", async (req, res) => {
     $("table tbody tr").each((_, row) => {
       const tds = $(row).find("td");
       if (tds.length < 6) return;
-
       quakes.push({
         datetime: $(tds[0]).text().trim(),
         latitude: parseFloat($(tds[1]).text().trim()) || 0,
@@ -84,22 +86,24 @@ app.get("/api/phivolcs", async (req, res) => {
       });
     });
 
-    if (quakes.length === 0) throw new Error("No earthquake data found");
+    if (!quakes.length) throw new Error("No earthquake data found");
 
-    // Sort newest first and take top 10
     quakes.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
     res.json(quakes.slice(0, 10));
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch error:", err.message);
-    await getUSGS(res); // fallback to USGS
+    await getUSGS(res);
+  } finally {
+    global.gc?.(); // ✅ Clean up memory if exposed
   }
 });
 
+// ✅ Fetch all (limited to 50 entries)
 app.get("/api/phivolcs/all", async (req, res) => {
   console.log("🌏 Fetching ALL PHIVOLCS data...");
   try {
     const url = "https://earthquake.phivolcs.dost.gov.ph/";
-    const response = await safeFetch(`${url}?t=${Date.now()}`, { agent }, 8000);
+    const response = await safeFetch(`${url}?t=${Date.now()}`, { agent }, 7000);
 
     if (!response.ok) throw new Error("Failed to fetch PHIVOLCS page");
 
@@ -107,11 +111,9 @@ app.get("/api/phivolcs/all", async (req, res) => {
     const $ = cheerio.load(html);
 
     const quakes = [];
-
     $("table tbody tr").each((_, row) => {
       const tds = $(row).find("td");
       if (tds.length < 6) return;
-
       quakes.push({
         datetime: $(tds[0]).text().trim(),
         latitude: parseFloat($(tds[1]).text().trim()) || 0,
@@ -123,19 +125,21 @@ app.get("/api/phivolcs/all", async (req, res) => {
       });
     });
 
-    if (quakes.length === 0) throw new Error("No earthquake data found");
+    if (!quakes.length) throw new Error("No earthquake data found");
 
-    // Sort newest first
     quakes.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
 
-    res.json(quakes); // send all data
+    // ✅ Limit to 50 entries to reduce memory
+    res.json(quakes.slice(0, 50));
   } catch (err) {
     console.error("⚠️ PHIVOLCS fetch ALL error:", err.message);
     res.status(500).json({ error: "Unable to fetch all PHIVOLCS earthquake data" });
+  } finally {
+    global.gc?.(); // ✅ Manual garbage collection if available
   }
 });
 
-// USGS fallback
+// ✅ USGS fallback
 async function getUSGS(res, feed = "all_day") {
   try {
     const startTime = getStartTime(feed);
@@ -148,7 +152,7 @@ async function getUSGS(res, feed = "all_day") {
       "&minlongitude=116&maxlongitude=127" +
       "&minmagnitude=1";
 
-    const response = await safeFetch(url, {}, 8000);
+    const response = await safeFetch(url, {}, 7000);
     if (!response.ok) throw new Error("USGS fetch failed");
 
     const data = await response.json();
@@ -162,12 +166,13 @@ async function getUSGS(res, feed = "all_day") {
       source: "USGS",
     }));
 
-    // Sort newest first and slice top 10
     quakes.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
     res.json(quakes.slice(0, 10));
   } catch (err) {
     console.error("❌ Both PHIVOLCS and USGS failed:", err.message);
     res.status(500).json({ error: "Unable to fetch earthquake data" });
+  } finally {
+    global.gc?.(); // ✅ Clean up here too
   }
 }
 
